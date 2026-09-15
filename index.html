@@ -418,12 +418,10 @@
 const DATA_FILES = { eq1: 'data_equipe1.xlsx', eq2: 'data_equipe2.xlsx' };
 const ENTRAINEMENTS_FILE = 'entrainements.xlsx';
 const TEAM_LABELS = { eq1: 'Équipe 1', eq2: 'Équipe 2' };
-const TEAM_TAGS = { eq1: /U18-1/i, eq2: /U18-2/i };
+const TRAINING_TAGS = { eq1: /U18-1/i, eq2: /U18-2/i, u1011: /U10-U11/i, u1415: /U14-15|U14-U15/i };
 
 const YOUTH_ROSTER_FILE = 'Effectif.xlsx';
-const YOUTH_TRAINING_FILE = 'entrainements_jeunes.xlsx';
 const YOUTH_LABELS = { u1011: 'U10-U11', u1415: 'U14-U15' };
-const YOUTH_TAGS = { u1011: /U10-U11/i, u1415: /U14-15|U14-U15/i };
 
 function makeEmptyState(teamKey) {
   return {
@@ -451,8 +449,6 @@ let topLevel = 'u18';
 let state = makeEmptyState('eq2');
 
 let youthRosters = { u1011: [], u1415: [] };
-let youthTrainingData = { sessions: [], players: [] };
-let youthTrainingError = null;
 let youthGroup = null; // null while in "seniors" mode
 
 let topScorersChart = null;
@@ -484,15 +480,7 @@ async function loadEntrainements() {
   if (!res.ok) throw new Error('fichier introuvable (' + res.status + ')');
   const buf = await res.arrayBuffer();
   const wb = XLSX.read(buf, { type: 'array', cellDates: true });
-  return parseEntrainements(wb, TEAM_TAGS);
-}
-
-async function loadYouthTraining() {
-  const res = await fetch(YOUTH_TRAINING_FILE, { cache: 'no-store' });
-  if (!res.ok) throw new Error('fichier introuvable (' + res.status + ')');
-  const buf = await res.arrayBuffer();
-  const wb = XLSX.read(buf, { type: 'array', cellDates: true });
-  return parseEntrainements(wb, YOUTH_TAGS);
+  return parseEntrainements(wb, TRAINING_TAGS);
 }
 
 async function loadYouthRosters() {
@@ -573,18 +561,15 @@ function normalizeName(s) {
 
 async function init() {
   const results = await Promise.allSettled([
-    loadTeam('eq1'), loadTeam('eq2'), loadEntrainements(),
-    loadYouthRosters(), loadYouthTraining(),
+    loadTeam('eq1'), loadTeam('eq2'), loadEntrainements(), loadYouthRosters(),
   ]);
-  const [r1, r2, r3, r4, r5] = results;
+  const [r1, r2, r3, r4] = results;
   if (r1.status === 'fulfilled') teamData.eq1 = r1.value; else teamError.eq1 = r1.reason;
   if (r2.status === 'fulfilled') teamData.eq2 = r2.value; else teamError.eq2 = r2.reason;
   if (r3.status === 'fulfilled') entrainementsData = r3.value;
-  else console.warn('Entraînements U18 non chargés :', r3.reason && r3.reason.message);
+  else console.warn('Entraînements non chargés :', r3.reason && r3.reason.message);
   if (r4.status === 'fulfilled') youthRosters = r4.value;
   else console.warn('Effectifs jeunes non chargés :', r4.reason && r4.reason.message);
-  if (r5.status === 'fulfilled') youthTrainingData = r5.value;
-  else youthTrainingError = r5.reason;
 
   if (!teamData.eq1 && !teamData.eq2) {
     document.getElementById('app').innerHTML =
@@ -1751,7 +1736,7 @@ function renderYouthMatchs(key) {
 function youthTrainingStatsFor(name, sessions) {
   if (sessions.length === 0) return { count: 0, rate: null };
   const normTarget = normalizeName(name);
-  const entry = youthTrainingData.players.find(p => {
+  const entry = entrainementsData.players.find(p => {
     const n = normalizeName(p.nom);
     return n.includes(normTarget) || normTarget.includes(n);
   });
@@ -1767,7 +1752,7 @@ function renderYouthJoueurs(key) {
     el.innerHTML = '<div class="empty">Effectif non disponible pour ce groupe. Vérifiez que le fichier <code>' + YOUTH_ROSTER_FILE + '</code> est bien présent.</div>';
     return;
   }
-  const sessions = youthTrainingData.sessions.filter(s => s.team === key).sort((a, b) => a.date - b.date);
+  const sessions = entrainementsData.sessions.filter(s => s.team === key).sort((a, b) => a.date - b.date);
 
   const rows = roster
     .map(name => Object.assign({ nom: name }, youthTrainingStatsFor(name, sessions)))
@@ -1794,13 +1779,10 @@ function renderYouthJoueurs(key) {
 
 function renderYouthEntrainementView(key) {
   const el = document.getElementById('view-entrainement');
-  const sessions = youthTrainingData.sessions.filter(s => s.team === key).sort((a, b) => a.date - b.date);
+  const sessions = entrainementsData.sessions.filter(s => s.team === key).sort((a, b) => a.date - b.date);
 
   if (sessions.length === 0) {
-    const reason = youthTrainingError
-      ? 'Vérifiez que le fichier <code>' + YOUTH_TRAINING_FILE + '</code> est bien présent à côté de cette page.'
-      : '';
-    el.innerHTML = '<div class="empty">Aucune séance d\'entraînement enregistrée pour ' + escapeHtml(YOUTH_LABELS[key]) + ' pour l\'instant.<br>' + reason + '</div>';
+    el.innerHTML = '<div class="empty">Aucune séance d\'entraînement enregistrée pour ' + escapeHtml(YOUTH_LABELS[key]) + ' pour l\'instant.</div>';
     return;
   }
 
@@ -1811,7 +1793,7 @@ function renderYouthEntrainementView(key) {
     return rosterNorm.some(r => n.includes(r) || r.includes(n));
   }
 
-  const rows = youthTrainingData.players
+  const rows = entrainementsData.players
     .filter(p => isOwn(p.nom))
     .map(p => {
       const presence = sessions.map(s => !!p.presence[s.colIndex]);
